@@ -80,7 +80,7 @@ func main() {
 			os.Exit(1)
 		}
 		// fmt.Println(fileType, fileLength, string(fileContent))
-		fmt.Println(string(fileContent))
+		fmt.Print(string(fileContent))
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
