@@ -21,11 +21,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "usage: mygit <command> [<args>...]\n")
 		os.Exit(1)
 	}
-
-	switch command := os.Args[1]; command {
-	case "init":
-		// Uncomment this block to pass the first stage!
-		//
+	command := os.Args[1]
+	if command == "init" {
 		for _, dir := range []string{".git", ".git/objects", ".git/refs"} {
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				fmt.Fprintf(os.Stderr, "Error creating directory: %s\n", err)
@@ -38,54 +35,60 @@ func main() {
 		}
 
 		fmt.Println("Initialized git directory")
-
-	case "cat-file":
+	} else {
+		// any command other than init should make sure the working dir is git valid
 		checkInit()
-		// fmt.Println(os.Args)
-		if len(os.Args) < 4 {
-			fmt.Fprintf(os.Stderr, "usage: mygit cat-file -p <blobHash>\n")
+		switch command {
+		case "cat-file":
+			// fmt.Println(os.Args)
+			if len(os.Args) < 4 {
+				fmt.Fprintf(os.Stderr, "usage: mygit cat-file -p <blobHash>\n")
+				os.Exit(1)
+			}
+			// check expected args
+			flag := os.Args[2]
+			if flag != "-p" {
+				fmt.Fprintf(os.Stderr, "missing mandatory flag -p: \n")
+				os.Exit(1)
+			}
+			blobHash := os.Args[3]
+
+			prefix := blobHash[:2]
+			filepath := blobHash[2:]
+
+			objectsDirPath := ".git/objects/"
+			objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
+
+			// read file content
+			fileContent, err := os.ReadFile(objectPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while reading the file: %s \n", err)
+				os.Exit(1)
+			}
+			decompressed, err := decompressZlib(fileContent)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while decompressing file content: %s \n", err)
+				os.Exit(1)
+			}
+			// fmt.Println(decompressed)
+
+			_, _, fileContent, err = parseObjectContent(decompressed)
+			// fileType, fileLength, fileContent, err := parseObjectContent(decompressed)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while parsing file content: %s \n", err)
+				os.Exit(1)
+			}
+			// fmt.Println(fileType, fileLength, string(fileContent))
+			fmt.Print(string(fileContent))
+
+		case "hash-object":
+
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 			os.Exit(1)
 		}
-		// check expected args
-		flag := os.Args[2]
-		if flag != "-p" {
-			fmt.Fprintf(os.Stderr, "missing mandatory flag -p: \n")
-			os.Exit(1)
-		}
-		blobHash := os.Args[3]
-
-		prefix := blobHash[:2]
-		filepath := blobHash[2:]
-
-		objectsDirPath := ".git/objects/"
-		objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
-
-		// read file content
-		fileContent, err := os.ReadFile(objectPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while reading the file: %s \n", err)
-			os.Exit(1)
-		}
-		decompressed, err := decompressZlib(fileContent)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while decompressing file content: %s \n", err)
-			os.Exit(1)
-		}
-		// fmt.Println(decompressed)
-
-		_, _, fileContent, err = parseObjectContent(decompressed)
-		// fileType, fileLength, fileContent, err := parseObjectContent(decompressed)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error while parsing file content: %s \n", err)
-			os.Exit(1)
-		}
-		// fmt.Println(fileType, fileLength, string(fileContent))
-		fmt.Print(string(fileContent))
-
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
-		os.Exit(1)
 	}
+
 }
 
 func checkInit() {
