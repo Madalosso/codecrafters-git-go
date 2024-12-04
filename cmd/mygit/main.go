@@ -1,15 +1,11 @@
 package main
 
 import (
-	"bytes"
-	"compress/zlib"
 	"crypto/sha1"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	// "github.com/spf13/cobra" TODO: Use cobra to handle flags and commands
 )
 
@@ -55,28 +51,22 @@ func main() {
 				os.Exit(1)
 			}
 			blobHash := os.Args[3]
-
 			objectPath := hashToFilePath(blobHash)
-			// prefix := blobHash[:2]
-			// filepath := blobHash[2:]
-			// objectsDirPath := ".git/objects/"
-			// objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
-
 			// read file content
 			fileContent, err := os.ReadFile(objectPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while reading the file: %s \n", err)
 				os.Exit(1)
 			}
-			decompressed, err := decompressZlib(fileContent)
+			decompressed, err := DecompressZlib(fileContent)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while decompressing file content: %s \n", err)
 				os.Exit(1)
 			}
 			// fmt.Println(decompressed)
 
-			_, _, fileContent, err = parseObjectContent(decompressed)
-			// fileType, fileLength, fileContent, err := parseObjectContent(decompressed)
+			_, _, fileContent, err = ParseObjectContent(decompressed)
+			// fileType, fileLength, fileContent, err := ParseObjectContent(decompressed)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while parsing file content: %s \n", err)
 				os.Exit(1)
@@ -120,7 +110,7 @@ func main() {
 			fmt.Printf("%x", hash)
 			hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
 
-			compressedFileContent, err := compressZlib(hashPayload)
+			compressedFileContent, err := CompressZlib(hashPayload)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
 				os.Exit(1)
@@ -158,14 +148,14 @@ func main() {
 				os.Exit(1)
 			}
 			// 2.Zlib decompression
-			fileContent, err = decompressZlib(fileContent)
+			fileContent, err = DecompressZlib(fileContent)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while decompressing file content: %s \n", err)
 				os.Exit(1)
 			}
 
 			// 3.Parse decompressed content (get tree entries)
-			fileType, _, content, err := parseObjectContent(fileContent)
+			fileType, _, content, err := ParseObjectContent(fileContent)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while parsing file content: %s \n", err)
 				os.Exit(1)
@@ -176,7 +166,7 @@ func main() {
 			}
 			// assert.Equal("tree", fileType, "tree_sha provided is not a tree object")
 			// assert.Equal("tree", fileType, "tree_sha provided is not a tree object")
-			treeEntries, err := parseTreeEntry(content)
+			treeEntries, err := ParseTreeEntry(content)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while parsing tree entries: %s \n", err)
 				os.Exit(1)
@@ -187,6 +177,7 @@ func main() {
 			})
 			for _, entry := range treeEntries {
 				fmt.Println(entry.name)
+				// TODO: full print
 			}
 
 		default:
@@ -213,111 +204,4 @@ func hashToFilePath(hash string) string {
 	objectsDirPath := ".git/objects/"
 	objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
 	return objectPath
-}
-
-type objectType = string
-
-// TODO: Consider making the type an enum
-// <type> <length>\0<data>
-// blob 11\0hello world
-func parseObjectContent(data []byte) (objectType, int, []byte, error) {
-	indexZeroByte := bytes.IndexByte(data, 0)
-	if indexZeroByte == -1 {
-		return "", 0, nil, fmt.Errorf("byte zero not found")
-	}
-
-	// <type> <length>
-	// splits on space
-	parts := bytes.Fields(data[:indexZeroByte])
-
-	if len(parts) != 2 {
-		return "", 0, nil, fmt.Errorf("header does not contain exactly two parts")
-	}
-
-	fileType := string(parts[0])
-	contentLength, err := strconv.Atoi(string(parts[1]))
-	if err != nil {
-		return "", 0, nil, fmt.Errorf("invalid length: %v", err)
-	}
-
-	// <data>
-	content := data[indexZeroByte+1:]
-	// fmt.Println(content)
-	if contentLength > len(content) {
-		return "", 0, nil, fmt.Errorf("data length beyond slice boundary")
-	}
-
-	return fileType, contentLength, content, nil
-
-}
-
-type TreeEntries struct {
-	mode string
-	name string
-	hash [20]byte
-}
-
-func parseTreeEntry(data []byte) ([]TreeEntries, error) {
-	var entries []TreeEntries
-	for len(data) > 0 {
-		indexZeroByte := bytes.IndexByte(data, 0)
-		if indexZeroByte == -1 {
-			return nil, fmt.Errorf("byte zero not found")
-		}
-
-		// <mode> <name>\0<hash>
-		// splits on space
-		parts := bytes.Fields(data[:indexZeroByte])
-
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("header does not contain exactly two parts")
-		}
-
-		mode := string(parts[0])
-		name := string(parts[1])
-
-		// <hash>
-		var hash [20]byte
-		copy(hash[:], data[indexZeroByte+1:indexZeroByte+21])
-
-		entries = append(entries, TreeEntries{
-			mode: mode,
-			name: name,
-			hash: hash,
-		})
-
-		// TODO: Check if this is valid, how this operation performs under the hood.
-		// is this just a pointer moving forward?
-		data = data[indexZeroByte+21:]
-	}
-	return entries, nil
-}
-
-// maybe create a struct for zlib operations (compress/decompress+read+write)
-func decompressZlib(data []byte) ([]byte, error) {
-	b := bytes.NewReader(data)
-	reader, err := zlib.NewReader(b)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-
-	decompressed, err := io.ReadAll(reader)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return decompressed, nil
-}
-
-func compressZlib(data []byte) ([]byte, error) {
-	var b bytes.Buffer
-	writer := zlib.NewWriter(&b)
-	_, err := writer.Write(data)
-	if err != nil {
-		return nil, err
-	}
-	writer.Close()
-	return b.Bytes(), nil
 }
