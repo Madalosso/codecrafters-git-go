@@ -94,7 +94,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "%s \n", err)
 				os.Exit(1)
 			}
-			fmt.Printf(hash)
+			fmt.Print(hash)
 
 		case "ls-tree":
 			if len(os.Args) < 4 {
@@ -243,7 +243,7 @@ func hashBlobObject(_filepath string) (string, error) {
 	hash := h.Sum(nil)
 
 	// print hash to stdout
-	fmt.Printf("%x", hash)
+	// fmt.Printf("%x", hash)
 	hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
 
 	compressedFileContent, err := CompressZlib(hashPayload)
