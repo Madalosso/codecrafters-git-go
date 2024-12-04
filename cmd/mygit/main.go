@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	// "github.com/spf13/cobra" TODO: Use cobra to handle flags and commands
 )
@@ -53,11 +55,11 @@ func main() {
 			}
 			blobHash := os.Args[3]
 
-			prefix := blobHash[:2]
-			filepath := blobHash[2:]
-
-			objectsDirPath := ".git/objects/"
-			objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
+			objectPath := hashToFilePath(blobHash)
+			// prefix := blobHash[:2]
+			// filepath := blobHash[2:]
+			// objectsDirPath := ".git/objects/"
+			// objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
 
 			// read file content
 			fileContent, err := os.ReadFile(objectPath)
@@ -83,6 +85,56 @@ func main() {
 
 		case "hash-object":
 
+			// fmt.Println(os.Args)
+			if len(os.Args) < 4 {
+				fmt.Fprintf(os.Stderr, "usage: mygit hash-object -w filepath\n")
+				os.Exit(1)
+			}
+			// check expected args
+			flag := os.Args[2]
+			if flag != "-w" {
+				fmt.Fprintf(os.Stderr, "missing mandatory flag -w: \n")
+				os.Exit(1)
+			}
+			_filepath := os.Args[3]
+			// read file content
+			content, err := os.ReadFile(_filepath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while reading file content: %s \n", err)
+				os.Exit(1)
+			}
+			// get content length
+			size := len(content)
+			// create header
+			header := fmt.Sprintf("blob %d\000", size)
+			// create hash + write to file (if -w flag is present)
+			hashPayload := append([]byte(header), content...)
+			h := sha1.New()
+
+			// SHA hash input = header <(header = type(blob) + ' '(space) + <size>\0)> + uncompressed content
+			h.Write(hashPayload)
+			hash := h.Sum(nil)
+
+			// print hash to stdout
+			fmt.Printf("%x\n", hash)
+			hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
+			fmt.Println(hashFilePath)
+
+			compressedFileContent, err := compressZlib(content)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
+				os.Exit(1)
+			}
+
+			// Write dirs and file
+			dirs := filepath.Dir(hashFilePath)
+			err = os.MkdirAll(dirs, 0755)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while creating directories: %s \n", err)
+				os.Exit(1)
+			}
+			os.WriteFile(hashFilePath, compressedFileContent, 0644)
+
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 			os.Exit(1)
@@ -97,6 +149,16 @@ func checkInit() {
 	if os.IsNotExist(err) || !fs.IsDir() {
 		panic("git not initialized (missing .git folder)")
 	}
+}
+
+// TODO: test what if hash empty? return string, error?
+func hashToFilePath(hash string) string {
+	prefix := hash[:2]
+	filepath := hash[2:]
+
+	objectsDirPath := ".git/objects/"
+	objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
+	return objectPath
 }
 
 // TODO: Consider making the type an enum
@@ -133,6 +195,7 @@ func parseObjectContent(data []byte) (string, int, []byte, error) {
 
 }
 
+// maybe create a struct for zlib operations (compress/decompress+read+write)
 func decompressZlib(data []byte) ([]byte, error) {
 	b := bytes.NewReader(data)
 	reader, err := zlib.NewReader(b)
@@ -148,4 +211,15 @@ func decompressZlib(data []byte) ([]byte, error) {
 	}
 
 	return decompressed, nil
+}
+
+func compressZlib(data []byte) ([]byte, error) {
+	var b bytes.Buffer
+	writer := zlib.NewWriter(&b)
+	_, err := writer.Write(data)
+	if err != nil {
+		return nil, err
+	}
+	writer.Close()
+	return b.Bytes(), nil
 }
