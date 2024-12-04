@@ -89,41 +89,12 @@ func main() {
 			}
 			_filepath := os.Args[3]
 			// read file content
-			content, err := os.ReadFile(_filepath)
+			hash, err := hashBlobObject(_filepath)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error while reading file content: %s \n", err)
+				fmt.Fprintf(os.Stderr, "%s \n", err)
 				os.Exit(1)
 			}
-			// get content length
-			size := len(content)
-			// create header
-			header := fmt.Sprintf("blob %d\000", size)
-			// create hash + write to file (if -w flag is present)
-			hashPayload := append([]byte(header), content...)
-			h := sha1.New()
-
-			// SHA hash input = header <(header = type(blob) + ' '(space) + <size>\0)> + uncompressed content
-			h.Write(hashPayload)
-			hash := h.Sum(nil)
-
-			// print hash to stdout
-			fmt.Printf("%x", hash)
-			hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
-
-			compressedFileContent, err := CompressZlib(hashPayload)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
-				os.Exit(1)
-			}
-
-			// Write dirs and file
-			dirs := filepath.Dir(hashFilePath)
-			err = os.MkdirAll(dirs, 0755)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error while creating directories: %s \n", err)
-				os.Exit(1)
-			}
-			os.WriteFile(hashFilePath, compressedFileContent, 0644)
+			fmt.Printf(hash)
 
 		case "ls-tree":
 			if len(os.Args) < 4 {
@@ -180,6 +151,19 @@ func main() {
 				// TODO: full print
 			}
 		case "write-tree":
+			// 1. Iterate over files/dirs within pwd (ignoring .git)
+			currentDir, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error getting current directory: %s \n", err)
+				os.Exit(1)
+			}
+
+			_, err = createTree(currentDir)
+			// Walk the directory tree
+
+			// 2a. if file -> Create blob object and record its SHA hash
+			// 2b. if dir -> Create tree object and record it. (recursive to handle nested dirs)
+			// 3. Write the tree objecct to .git/objects dir
 
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -205,4 +189,78 @@ func hashToFilePath(hash string) string {
 	objectsDirPath := ".git/objects/"
 	objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
 	return objectPath
+}
+
+func createTree(pathname string) (string, error) {
+	// Open the directory
+	dir, err := os.Open(pathname)
+	if err != nil {
+		return "", err
+	}
+	defer dir.Close()
+
+	// Get the list of files
+	fileInfo, err := dir.Readdir(-1)
+	if err != nil {
+		return "", err
+	}
+
+	// Iterate over the files
+	for _, file := range fileInfo {
+		// Construct the full path
+		fullPath := filepath.Join(pathname, file.Name())
+
+		// Check if the file is a directory
+		if file.IsDir() && file.Name() != ".git" {
+			// Recursively call createTree
+			createTree(fullPath)
+		} else {
+			// Print the file name
+			fmt.Println(fullPath)
+		}
+	}
+
+	return "", nil
+}
+
+func hashBlobObject(_filepath string) (string, error) {
+	content, err := os.ReadFile(_filepath)
+	if err != nil {
+		// refactor to return the error (function signature)
+		fmt.Fprintf(os.Stderr, "Error while reading file content: %s \n", err)
+		os.Exit(1)
+	}
+	// get content length
+	size := len(content)
+	// create header
+	header := fmt.Sprintf("blob %d\000", size)
+	// create hash + write to file (if -w flag is present)
+	hashPayload := append([]byte(header), content...)
+	h := sha1.New()
+
+	// SHA hash input = header <(header = type(blob) + ' '(space) + <size>\0)> + uncompressed content
+	h.Write(hashPayload)
+	hash := h.Sum(nil)
+
+	// print hash to stdout
+	fmt.Printf("%x", hash)
+	hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
+
+	compressedFileContent, err := CompressZlib(hashPayload)
+	if err != nil {
+		// refactor to return the error (function signature)
+		fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
+		os.Exit(1)
+	}
+
+	// Write dirs and file
+	dirs := filepath.Dir(hashFilePath)
+	err = os.MkdirAll(dirs, 0755)
+	if err != nil {
+		// refactor to return the error (function signature)
+		fmt.Fprintf(os.Stderr, "Error while creating directories: %s \n", err)
+		os.Exit(1)
+	}
+	os.WriteFile(hashFilePath, compressedFileContent, 0644)
+	return fmt.Sprintf("%x", hash), nil
 }
