@@ -116,9 +116,9 @@ func main() {
 			hash := h.Sum(nil)
 
 			// print hash to stdout
-			fmt.Printf("%x\n", hash)
+			fmt.Printf("%x", hash)
 			hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
-			fmt.Println(hashFilePath)
+			// fmt.Println(hashFilePath)
 
 			compressedFileContent, err := compressZlib(content)
 			if err != nil {
