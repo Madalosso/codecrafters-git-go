@@ -254,16 +254,12 @@ func writeTree(pathname string) ([20]byte, error) {
 				os.Exit(1)
 			}
 			treeEntries = append(treeEntries, TreeEntries{
-				mode:       "040000", //TODO: Find file permission to properly set this
-				objectType: "tree",   //TODO: Enum?
+				mode:       "40000", //TODO: Find file permission to properly set this
+				objectType: "tree",  //TODO: Enum?
 				name:       file.Name(),
 				hash:       hashTree,
 			})
 		} else {
-			// Print the file name
-			fmt.Println(file.Name())
-			fmt.Println(fullFilePath)
-
 			hash, _ := writeBlobObject(fullFilePath)
 
 			treeEntries = append(treeEntries, TreeEntries{
@@ -275,22 +271,20 @@ func writeTree(pathname string) ([20]byte, error) {
 		}
 	}
 
-	header := fmt.Sprintf("tree %d\000", len(treeEntries)) // wrong len(treeEntries)
-	treePayload := []byte(header)
+	sort.Slice(treeEntries, func(i, j int) bool {
+		return treeEntries[i].name < treeEntries[j].name
+	})
+
+	treePayload := []byte{}
 	for _, entry := range treeEntries {
-		fmt.Println(entry.name)
-		entryContent := []byte(entry.mode)
-		// treePayload = append(treePayload, []byte("100644")...)
-		entryContent = append(entryContent, []byte(entry.mode)...)
-		entryContent = append(entryContent, []byte(entry.name)...)
-		entryContent = append(entryContent, '\000') // sera?
-		// entryContent = append(entryContent, 0) //  ou sera?
+		entryContent := []byte(fmt.Sprintf("%s %s\000", entry.mode, entry.name))
 		entryContent = append(entryContent, entry.hash[:]...)
-		fmt.Println(entryContent)
 		treePayload = append(treePayload, entryContent...)
 	}
+	header := []byte(fmt.Sprintf("tree %d\000", len(treePayload)))
 
-	return writeFileFromPayload(treePayload)
+	completePayload := append(header, treePayload...)
+	return writeFileFromPayload(completePayload)
 }
 
 func writeBlobObject(_filepath string) ([20]byte, error) {
