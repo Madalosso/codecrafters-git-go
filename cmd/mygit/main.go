@@ -179,6 +179,7 @@ func main() {
 				fmt.Println(entry.name)
 				// TODO: full print
 			}
+		case "write-tree":
 
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
