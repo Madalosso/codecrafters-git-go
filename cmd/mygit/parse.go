@@ -6,12 +6,13 @@ import (
 	"strconv"
 )
 
-type TreeEntries struct {
-	mode string
-	name string
-	hash [20]byte
-}
 type objectType = string
+type TreeEntries struct {
+	mode       string
+	name       string
+	objectType objectType
+	hash       [20]byte
+}
 
 // TODO: Consider making the type an enum
 // <type> <length>\0<data>

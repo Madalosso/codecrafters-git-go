@@ -89,12 +89,16 @@ func main() {
 			}
 			_filepath := os.Args[3]
 			// read file content
-			hash, err := hashBlobObject(_filepath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s \n", err)
-				os.Exit(1)
-			}
-			fmt.Print(hash)
+			hash, _ := writeBlobObject(_filepath)
+
+			// Refactor: function errors from writeBlobObject are
+			// printing to stderr and exiting the program.
+			// Instead, return the error and let the caller handle it.
+			// if err != nil {
+			// 	fmt.Fprintf(os.Stderr, "%s \n", err)
+			// 	os.Exit(1)
+			// }
+			fmt.Printf("%x", hash)
 
 		case "ls-tree":
 			if len(os.Args) < 4 {
@@ -135,8 +139,6 @@ func main() {
 				fmt.Fprintf(os.Stderr, "tree_sha provided is not a tree object\n")
 				os.Exit(1)
 			}
-			// assert.Equal("tree", fileType, "tree_sha provided is not a tree object")
-			// assert.Equal("tree", fileType, "tree_sha provided is not a tree object")
 			treeEntries, err := ParseTreeEntry(content)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while parsing tree entries: %s \n", err)
@@ -158,12 +160,11 @@ func main() {
 				os.Exit(1)
 			}
 
-			_, err = createTree(currentDir)
-			// Walk the directory tree
+			_, err = writeTree(currentDir)
 
 			// 2a. if file -> Create blob object and record its SHA hash
 			// 2b. if dir -> Create tree object and record it. (recursive to handle nested dirs)
-			// 3. Write the tree objecct to .git/objects dir
+			// 3. Write the tree object to .git/objects dir
 
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -191,39 +192,99 @@ func hashToFilePath(hash string) string {
 	return objectPath
 }
 
-func createTree(pathname string) (string, error) {
+func writeFileFromPayload(payload []byte) ([20]byte, error) {
+
+	h := sha1.New()
+	h.Write(payload)
+	payloadHash := h.Sum(nil)
+	hashFilePath := hashToFilePath(fmt.Sprintf("%x", payloadHash))
+	compressedFileContent, err := CompressZlib(payload)
+	if err != nil {
+		// refactor to return the error (function signature)
+		fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
+		os.Exit(1)
+	}
+	dirs := filepath.Dir(hashFilePath)
+	err = os.MkdirAll(dirs, 0755)
+	if err != nil {
+		// refactor to return the error (function signature)
+		fmt.Fprintf(os.Stderr, "Error while creating directories: %s \n", err)
+		os.Exit(1)
+	}
+	os.WriteFile(hashFilePath, compressedFileContent, 0644)
+
+	var hashArray [20]byte
+	copy(hashArray[:], payloadHash)
+	return hashArray, nil
+}
+
+func writeTree(pathname string) ([20]byte, error) {
 	// Open the directory
 	dir, err := os.Open(pathname)
 	if err != nil {
-		return "", err
+		// return "", err
+		fmt.Fprintf(os.Stderr, "Error while opening directory: %s \n", err)
+		os.Exit(1)
 	}
 	defer dir.Close()
 
 	// Get the list of files
 	fileInfo, err := dir.Readdir(-1)
 	if err != nil {
-		return "", err
+		fmt.Fprintf(os.Stderr, "Error while reading directory files: %s \n", err)
+		os.Exit(1)
 	}
 
+	treeEntries := []TreeEntries{}
 	// Iterate over the files
 	for _, file := range fileInfo {
 		// Construct the full path
-		fullPath := filepath.Join(pathname, file.Name())
+		fullFilePath := filepath.Join(pathname, file.Name())
+
+		if file.Name() == ".git" {
+			continue
+		}
 
 		// Check if the file is a directory
-		if file.IsDir() && file.Name() != ".git" {
-			// Recursively call createTree
-			createTree(fullPath)
+		if file.IsDir() {
+			// Recursively call writeTree
+			// writeTree(fullPath)
+			//
 		} else {
 			// Print the file name
-			fmt.Println(fullPath)
+			fmt.Println(file.Name())
+			fmt.Println(fullFilePath)
+
+			hash, _ := writeBlobObject(fullFilePath)
+
+			treeEntries = append(treeEntries, TreeEntries{
+				mode:       "100644", //TODO: Find file permission to properly set this
+				objectType: "blob",   //TODO: Enum?
+				name:       file.Name(),
+				hash:       hash,
+			})
 		}
 	}
 
-	return "", nil
+	header := fmt.Sprintf("tree %d\000", len(treeEntries)) // wrong len(treeEntries)
+	treePayload := []byte(header)
+	for _, entry := range treeEntries {
+		fmt.Println(entry.name)
+		entryContent := []byte(entry.mode)
+		// treePayload = append(treePayload, []byte("100644")...)
+		entryContent = append(entryContent, []byte(entry.mode)...)
+		entryContent = append(entryContent, []byte(entry.name)...)
+		entryContent = append(entryContent, '\000') // sera?
+		// entryContent = append(entryContent, 0) //  ou sera?
+		entryContent = append(entryContent, entry.hash[:]...)
+		fmt.Println(entryContent)
+		treePayload = append(treePayload, entryContent...)
+	}
+
+	return writeFileFromPayload(treePayload)
 }
 
-func hashBlobObject(_filepath string) (string, error) {
+func writeBlobObject(_filepath string) ([20]byte, error) {
 	content, err := os.ReadFile(_filepath)
 	if err != nil {
 		// refactor to return the error (function signature)
@@ -235,32 +296,7 @@ func hashBlobObject(_filepath string) (string, error) {
 	// create header
 	header := fmt.Sprintf("blob %d\000", size)
 	// create hash + write to file (if -w flag is present)
-	hashPayload := append([]byte(header), content...)
-	h := sha1.New()
+	blobPayload := append([]byte(header), content...)
 
-	// SHA hash input = header <(header = type(blob) + ' '(space) + <size>\0)> + uncompressed content
-	h.Write(hashPayload)
-	hash := h.Sum(nil)
-
-	// print hash to stdout
-	// fmt.Printf("%x", hash)
-	hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
-
-	compressedFileContent, err := CompressZlib(hashPayload)
-	if err != nil {
-		// refactor to return the error (function signature)
-		fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
-		os.Exit(1)
-	}
-
-	// Write dirs and file
-	dirs := filepath.Dir(hashFilePath)
-	err = os.MkdirAll(dirs, 0755)
-	if err != nil {
-		// refactor to return the error (function signature)
-		fmt.Fprintf(os.Stderr, "Error while creating directories: %s \n", err)
-		os.Exit(1)
-	}
-	os.WriteFile(hashFilePath, compressedFileContent, 0644)
-	return fmt.Sprintf("%x", hash), nil
+	return writeFileFromPayload(blobPayload)
 }
