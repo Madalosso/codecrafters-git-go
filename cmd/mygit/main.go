@@ -170,6 +170,10 @@ func main() {
 				fmt.Fprintf(os.Stderr, "Error while parsing file content: %s \n", err)
 				os.Exit(1)
 			}
+			if fileType != "tree" {
+				fmt.Fprintf(os.Stderr, "tree_sha provided is not a tree object\n")
+				os.Exit(1)
+			}
 			// assert.Equal("tree", fileType, "tree_sha provided is not a tree object")
 			// assert.Equal("tree", fileType, "tree_sha provided is not a tree object")
 			treeEntries, err := parseTreeEntry(content)
