@@ -120,7 +120,7 @@ func main() {
 			hashFilePath := hashToFilePath(fmt.Sprintf("%x", hash))
 			// fmt.Println(hashFilePath)
 
-			compressedFileContent, err := compressZlib(content)
+			compressedFileContent, err := compressZlib(hashPayload)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
 				os.Exit(1)
