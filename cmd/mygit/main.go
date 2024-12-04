@@ -160,11 +160,12 @@ func main() {
 				os.Exit(1)
 			}
 
-			_, err = writeTree(currentDir)
-
-			// 2a. if file -> Create blob object and record its SHA hash
-			// 2b. if dir -> Create tree object and record it. (recursive to handle nested dirs)
-			// 3. Write the tree object to .git/objects dir
+			hash, err := writeTree(currentDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while writing tree: %s \n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("%x", hash)
 
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -247,9 +248,17 @@ func writeTree(pathname string) ([20]byte, error) {
 
 		// Check if the file is a directory
 		if file.IsDir() {
-			// Recursively call writeTree
-			// writeTree(fullPath)
-			//
+			hashTree, err := writeTree(fullFilePath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while writing tree: %s \n", err)
+				os.Exit(1)
+			}
+			treeEntries = append(treeEntries, TreeEntries{
+				mode:       "040000", //TODO: Find file permission to properly set this
+				objectType: "tree",   //TODO: Enum?
+				name:       file.Name(),
+				hash:       hashTree,
+			})
 		} else {
 			// Print the file name
 			fmt.Println(file.Name())
