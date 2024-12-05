@@ -1,15 +1,18 @@
 package main
 
 import (
-	"crypto/sha1"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 	// "github.com/spf13/cobra" TODO: Use cobra to handle flags and commands
 )
 
-var ()
+const (
+	authorName  = "Otavio Migliavacca Madalosso"
+	authorEmail = "otaviomadalosso@gmail.com"
+)
 
 // Usage: your_program.sh <command> <arg1> <arg2> ...
 func main() {
@@ -167,6 +170,34 @@ func main() {
 			}
 			fmt.Printf("%x", hash)
 
+		case "commit-tree":
+			// adopt Cobra to handle this
+			// mygit commit-tree <tree_sha> -p <commit_sha> -m <message>
+			// -p flag and value is optional
+			var (
+				treeSha   string
+				parentSha string
+				message   string
+			)
+			switch len(os.Args) {
+			case 5: // assume without -p + commit_sha (mygit commit-tree <tree_sha> -m <message>)
+				treeSha = os.Args[2]
+				message = os.Args[4]
+			case 7: // mygit commit-tree <tree_sha> -p <commit_sha> -m <message>
+				treeSha = os.Args[2]
+				parentSha = os.Args[4]
+				message = os.Args[6]
+			default:
+				fmt.Fprintf(os.Stderr, "usage: mygit commit-tree <tree_sha> [-p <commit_sha>] -m <message>\n")
+				os.Exit(1)
+			}
+			hash, err := buildCommitTree(treeSha, parentSha, message)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error while writing commit tree: %s \n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("%x", hash)
+
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
 			os.Exit(1)
@@ -193,30 +224,29 @@ func hashToFilePath(hash string) string {
 	return objectPath
 }
 
-func writeFileFromPayload(payload []byte) ([20]byte, error) {
+func buildCommitTree(treeSha, parentSha, message string) ([20]byte, error) {
+	now := time.Now()
+	unixNow := now.Unix()
+	_, offset := now.Zone()
+	offsetHours := offset / 3600
+	nowFormatted := fmt.Sprintf("%d %02d00", unixNow, offsetHours)
 
-	h := sha1.New()
-	h.Write(payload)
-	payloadHash := h.Sum(nil)
-	hashFilePath := hashToFilePath(fmt.Sprintf("%x", payloadHash))
-	compressedFileContent, err := CompressZlib(payload)
-	if err != nil {
-		// refactor to return the error (function signature)
-		fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
-		os.Exit(1)
+	// Content of the commit object
+	content := []byte(fmt.Sprintf("tree %s\n", treeSha))
+	if parentSha != "" {
+		// Improve: Check consider possibility of multiple parents?
+		content = append(content, []byte(fmt.Sprintf("parent %s\n", parentSha))...)
 	}
-	dirs := filepath.Dir(hashFilePath)
-	err = os.MkdirAll(dirs, 0755)
-	if err != nil {
-		// refactor to return the error (function signature)
-		fmt.Fprintf(os.Stderr, "Error while creating directories: %s \n", err)
-		os.Exit(1)
-	}
-	os.WriteFile(hashFilePath, compressedFileContent, 0644)
 
-	var hashArray [20]byte
-	copy(hashArray[:], payloadHash)
-	return hashArray, nil
+	content = append(content, []byte(fmt.Sprintf("author %s <%s> %s\n", authorName, authorEmail, nowFormatted))...)
+	content = append(content, []byte(fmt.Sprintf("commiter %s <%s> %s\n\n", authorName, authorEmail, nowFormatted))...)
+	content = append(content, []byte(fmt.Sprintln(message))...)
+
+	// CONSIDER: Maybe header could be part of WriteFileFromPayload (send type as argument)
+	header := []byte(fmt.Sprintf("commit %d\000", len(content)))
+
+	completePayload := append(header, content...)
+	return WriteFileFromPayload(completePayload)
 }
 
 func writeTree(pathname string) ([20]byte, error) {
@@ -242,12 +272,13 @@ func writeTree(pathname string) ([20]byte, error) {
 		// Construct the full path
 		fullFilePath := filepath.Join(pathname, file.Name())
 
+		// skip .git dir
 		if file.Name() == ".git" {
 			continue
 		}
 
-		// Check if the file is a directory
 		if file.IsDir() {
+			// recursively create tree for sub directories
 			hashTree, err := writeTree(fullFilePath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while writing tree: %s \n", err)
@@ -261,7 +292,6 @@ func writeTree(pathname string) ([20]byte, error) {
 			})
 		} else {
 			hash, _ := writeBlobObject(fullFilePath)
-
 			treeEntries = append(treeEntries, TreeEntries{
 				mode:       "100644", //TODO: Find file permission to properly set this
 				objectType: "blob",   //TODO: Enum?
@@ -271,6 +301,7 @@ func writeTree(pathname string) ([20]byte, error) {
 		}
 	}
 
+	// sort tree entries by name
 	sort.Slice(treeEntries, func(i, j int) bool {
 		return treeEntries[i].name < treeEntries[j].name
 	})
@@ -284,7 +315,7 @@ func writeTree(pathname string) ([20]byte, error) {
 	header := []byte(fmt.Sprintf("tree %d\000", len(treePayload)))
 
 	completePayload := append(header, treePayload...)
-	return writeFileFromPayload(completePayload)
+	return WriteFileFromPayload(completePayload)
 }
 
 func writeBlobObject(_filepath string) ([20]byte, error) {
@@ -300,6 +331,5 @@ func writeBlobObject(_filepath string) ([20]byte, error) {
 	header := fmt.Sprintf("blob %d\000", size)
 	// create hash + write to file (if -w flag is present)
 	blobPayload := append([]byte(header), content...)
-
-	return writeFileFromPayload(blobPayload)
+	return WriteFileFromPayload(blobPayload)
 }
