@@ -13,7 +13,7 @@ func WriteFileFromPayload(payload []byte, objectType string) ([20]byte, error) {
 	h := sha1.New()
 	h.Write(completePayload)
 	payloadHash := h.Sum(nil)
-	hashFilePath := hashToFilePath(fmt.Sprintf("%x", payloadHash))
+	hashFilePath := HashToFilePath(fmt.Sprintf("%x", payloadHash))
 	compressedFileContent, err := CompressZlib(completePayload)
 	if err != nil {
 		// refactor to return the error (function signature)
@@ -32,4 +32,13 @@ func WriteFileFromPayload(payload []byte, objectType string) ([20]byte, error) {
 	var hashArray [20]byte
 	copy(hashArray[:], payloadHash)
 	return hashArray, nil
+}
+
+func HashToFilePath(hash string) string {
+	prefix := hash[:2]
+	filepath := hash[2:]
+
+	objectsDirPath := ".git/objects/"
+	objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
+	return objectPath
 }

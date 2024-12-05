@@ -3,9 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
-	"time"
 	// "github.com/spf13/cobra" TODO: Use cobra to handle flags and commands
 )
 
@@ -54,7 +52,7 @@ func main() {
 				os.Exit(1)
 			}
 			blobHash := os.Args[3]
-			objectPath := hashToFilePath(blobHash)
+			objectPath := HashToFilePath(blobHash)
 			// read file content
 			fileContent, err := os.ReadFile(objectPath)
 			if err != nil {
@@ -92,9 +90,9 @@ func main() {
 			}
 			_filepath := os.Args[3]
 			// read file content
-			hash, _ := writeBlobObject(_filepath)
+			hash, _ := WriteBlobObject(_filepath)
 
-			// Refactor: function errors from writeBlobObject are
+			// Refactor: function errors from WriteBlobObject are
 			// printing to stderr and exiting the program.
 			// Instead, return the error and let the caller handle it.
 			// if err != nil {
@@ -117,7 +115,7 @@ func main() {
 			treeSha := os.Args[3]
 
 			// 1.search .git/objects for the treeSha entry
-			treePath := hashToFilePath(treeSha)
+			treePath := HashToFilePath(treeSha)
 			// handle err as well
 
 			fileContent, err := os.ReadFile(treePath)
@@ -163,7 +161,7 @@ func main() {
 				os.Exit(1)
 			}
 
-			hash, err := writeTree(currentDir)
+			hash, err := WriteTree(currentDir)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while writing tree: %s \n", err)
 				os.Exit(1)
@@ -191,12 +189,15 @@ func main() {
 				fmt.Fprintf(os.Stderr, "usage: mygit commit-tree <tree_sha> [-p <commit_sha>] -m <message>\n")
 				os.Exit(1)
 			}
-			hash, err := buildCommitTree(treeSha, parentSha, message)
+			hash, err := BuildCommitTree(treeSha, parentSha, message)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error while writing commit tree: %s \n", err)
 				os.Exit(1)
 			}
 			fmt.Printf("%x", hash)
+
+		case "clone":
+			// mygit clone <repo_url> <some_dir>
 
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown command %s\n", command)
@@ -212,111 +213,4 @@ func checkInit() {
 	if os.IsNotExist(err) || !fs.IsDir() {
 		panic("git not initialized (missing .git folder)")
 	}
-}
-
-// TODO: test what if hash empty? return string, error?
-func hashToFilePath(hash string) string {
-	prefix := hash[:2]
-	filepath := hash[2:]
-
-	objectsDirPath := ".git/objects/"
-	objectPath := fmt.Sprintf("%s%s/%s", objectsDirPath, prefix, filepath)
-	return objectPath
-}
-
-func buildCommitTree(treeSha, parentSha, message string) ([20]byte, error) {
-	now := time.Now()
-	unixNow := now.Unix()
-	_, offset := now.Zone()
-	offsetHours := offset / 3600
-	nowFormatted := fmt.Sprintf("%d %02d00", unixNow, offsetHours)
-
-	// Content of the commit object
-	content := []byte(fmt.Sprintf("tree %s\n", treeSha))
-	if parentSha != "" {
-		// Improve: Check consider possibility of multiple parents?
-		content = append(content, []byte(fmt.Sprintf("parent %s\n", parentSha))...)
-	}
-
-	content = append(content, []byte(fmt.Sprintf("author %s <%s> %s\n", authorName, authorEmail, nowFormatted))...)
-	content = append(content, []byte(fmt.Sprintf("commiter %s <%s> %s\n\n", authorName, authorEmail, nowFormatted))...)
-	content = append(content, []byte(fmt.Sprintln(message))...)
-
-	return WriteFileFromPayload(content, "commit")
-}
-
-func writeTree(pathname string) ([20]byte, error) {
-	// Open the directory
-	dir, err := os.Open(pathname)
-	if err != nil {
-		// return "", err
-		fmt.Fprintf(os.Stderr, "Error while opening directory: %s \n", err)
-		os.Exit(1)
-	}
-	defer dir.Close()
-
-	// Get the list of files
-	fileInfo, err := dir.Readdir(-1)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error while reading directory files: %s \n", err)
-		os.Exit(1)
-	}
-
-	treeEntries := []TreeEntries{}
-	// Iterate over the files
-	for _, file := range fileInfo {
-		// Construct the full path
-		fullFilePath := filepath.Join(pathname, file.Name())
-
-		// skip .git dir
-		if file.Name() == ".git" {
-			continue
-		}
-
-		if file.IsDir() {
-			// recursively create tree for sub directories
-			hashTree, err := writeTree(fullFilePath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error while writing tree: %s \n", err)
-				os.Exit(1)
-			}
-			treeEntries = append(treeEntries, TreeEntries{
-				mode:       "40000", //TODO: Find file permission to properly set this
-				objectType: "tree",  //TODO: Enum?
-				name:       file.Name(),
-				hash:       hashTree,
-			})
-		} else {
-			hash, _ := writeBlobObject(fullFilePath)
-			treeEntries = append(treeEntries, TreeEntries{
-				mode:       "100644", //TODO: Find file permission to properly set this
-				objectType: "blob",   //TODO: Enum?
-				name:       file.Name(),
-				hash:       hash,
-			})
-		}
-	}
-
-	// sort tree entries by name
-	sort.Slice(treeEntries, func(i, j int) bool {
-		return treeEntries[i].name < treeEntries[j].name
-	})
-
-	treePayload := []byte{}
-	for _, entry := range treeEntries {
-		entryContent := []byte(fmt.Sprintf("%s %s\000", entry.mode, entry.name))
-		entryContent = append(entryContent, entry.hash[:]...)
-		treePayload = append(treePayload, entryContent...)
-	}
-	return WriteFileFromPayload(treePayload, "tree")
-}
-
-func writeBlobObject(_filepath string) ([20]byte, error) {
-	content, err := os.ReadFile(_filepath)
-	if err != nil {
-		// refactor to return the error (function signature)
-		fmt.Fprintf(os.Stderr, "Error while reading file content: %s \n", err)
-		os.Exit(1)
-	}
-	return WriteFileFromPayload(content, "blob")
 }
