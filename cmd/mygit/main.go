@@ -242,11 +242,7 @@ func buildCommitTree(treeSha, parentSha, message string) ([20]byte, error) {
 	content = append(content, []byte(fmt.Sprintf("commiter %s <%s> %s\n\n", authorName, authorEmail, nowFormatted))...)
 	content = append(content, []byte(fmt.Sprintln(message))...)
 
-	// CONSIDER: Maybe header could be part of WriteFileFromPayload (send type as argument)
-	header := []byte(fmt.Sprintf("commit %d\000", len(content)))
-
-	completePayload := append(header, content...)
-	return WriteFileFromPayload(completePayload)
+	return WriteFileFromPayload(content, "commit")
 }
 
 func writeTree(pathname string) ([20]byte, error) {
@@ -312,10 +308,7 @@ func writeTree(pathname string) ([20]byte, error) {
 		entryContent = append(entryContent, entry.hash[:]...)
 		treePayload = append(treePayload, entryContent...)
 	}
-	header := []byte(fmt.Sprintf("tree %d\000", len(treePayload)))
-
-	completePayload := append(header, treePayload...)
-	return WriteFileFromPayload(completePayload)
+	return WriteFileFromPayload(treePayload, "tree")
 }
 
 func writeBlobObject(_filepath string) ([20]byte, error) {
@@ -325,11 +318,5 @@ func writeBlobObject(_filepath string) ([20]byte, error) {
 		fmt.Fprintf(os.Stderr, "Error while reading file content: %s \n", err)
 		os.Exit(1)
 	}
-	// get content length
-	size := len(content)
-	// create header
-	header := fmt.Sprintf("blob %d\000", size)
-	// create hash + write to file (if -w flag is present)
-	blobPayload := append([]byte(header), content...)
-	return WriteFileFromPayload(blobPayload)
+	return WriteFileFromPayload(content, "blob")
 }

@@ -7,13 +7,14 @@ import (
 	"path/filepath"
 )
 
-func WriteFileFromPayload(payload []byte) ([20]byte, error) {
-
+func WriteFileFromPayload(payload []byte, objectType string) ([20]byte, error) {
+	header := []byte(fmt.Sprintf("%s %d\000", objectType, len(payload)))
+	completePayload := append(header, payload...)
 	h := sha1.New()
-	h.Write(payload)
+	h.Write(completePayload)
 	payloadHash := h.Sum(nil)
 	hashFilePath := hashToFilePath(fmt.Sprintf("%x", payloadHash))
-	compressedFileContent, err := CompressZlib(payload)
+	compressedFileContent, err := CompressZlib(completePayload)
 	if err != nil {
 		// refactor to return the error (function signature)
 		fmt.Fprintf(os.Stderr, "Error while compressing file content: %s \n", err)
